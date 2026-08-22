@@ -17,17 +17,33 @@ export class ComicViewer {
     this._uiTimer = null;
     this._touchStartX = 0;
     this._touchStartY = 0;
+    this._eventsBound = false;
   }
 
   setPages(pageList) {
     this.pages = pageList.map((p) => ({ ...p, wide: isWide(p.width, p.height) }));
     this._buildSpreads();
     this.currentSpread = 0;
-    this.slider.min = 0;
-    this.slider.max = Math.max(0, this.spreads.length - 1);
-    this.slider.value = 0;
+    this._updateSlider();
     this._bindEvents();
     this.render();
+  }
+
+  /** 追加ページを後ろに足す（裏読み込み用） */
+  appendPages(pageList) {
+    const keepSpread = this.currentSpread;
+    const mapped = pageList.map((p) => ({ ...p, wide: isWide(p.width, p.height) }));
+    this.pages.push(...mapped);
+    this._buildSpreads();
+    this.currentSpread = Math.min(keepSpread, Math.max(0, this.spreads.length - 1));
+    this._updateSlider();
+    this._updateInfo();
+  }
+
+  _updateSlider() {
+    this.slider.min = 0;
+    this.slider.max = Math.max(0, this.spreads.length - 1);
+    this.slider.value = this.currentSpread;
   }
 
   _buildSpreads() {
@@ -77,6 +93,10 @@ export class ComicViewer {
   }
 
   _updateInfo() {
+    if (!this.spreads.length) {
+      this.pageInfo.textContent = "…";
+      return;
+    }
     const spread = this.spreads[this.currentSpread];
     let label;
     if (spread.type === "single") {
@@ -147,6 +167,8 @@ export class ComicViewer {
   }
 
   _bindEvents() {
+    if (this._eventsBound) return;
+    this._eventsBound = true;
     document.addEventListener("keydown", this._boundKey);
     document.getElementById("click-left").addEventListener("click", this._boundClickLeft);
     document.getElementById("click-right").addEventListener("click", this._boundClickRight);
@@ -180,5 +202,6 @@ export class ComicViewer {
   destroy() {
     document.removeEventListener("keydown", this._boundKey);
     clearTimeout(this._uiTimer);
+    this._eventsBound = false;
   }
-}
+  }
