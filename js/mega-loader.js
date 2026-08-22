@@ -1,9 +1,9 @@
-import { File } from "https://cdn.jsdelivr.net/npm/megajs@1.3.0/dist/main.browser-esm.js";
+import { File } from "./megajs.esm.js";
 
 export async function loadMegaFolder(url, onProgress) {
   if (onProgress) onProgress("MEGAフォルダの解析中...");
 
-  // URLから純粋なフォルダ情報だけを強力に抽出する
+  // URLから純粋なフォルダ情報だけを抽出する
   let cleanUrl = url.trim();
 
   // # の位置を探す
