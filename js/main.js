@@ -15,6 +15,12 @@ const loadingProgress = document.getElementById("loading-progress");
 let viewer = null;
 let createdUrls = [];
 let loading = false;
+let bgAbort = false;
+
+/** 最初に表示するファイル数（少ないほど速い） */
+const FIRST_BATCH = 4;
+/** 裏で同時に落とす数 */
+const PARALLEL = 3;
 
 loadBtn.addEventListener("click", startLoad);
 megaUrlInput.addEventListener("keydown", (e) => {
@@ -26,6 +32,24 @@ const initialUrl = params.get("url");
 if (initialUrl) {
   megaUrlInput.value = decodeURIComponent(initialUrl);
   setTimeout(startLoad, 100);
+}
+
+async function processFile(item) {
+  const buffer = await downloadFile(item.file);
+  const pages = [];
+  if (item.isPdf) {
+    const pdfUrls = await renderPdfPages(buffer);
+    createdUrls.push(...pdfUrls);
+    for (const u of pdfUrls) {
+      try { pages.push(await loadImageSize(u)); } catch (_) {}
+    }
+  } else {
+    const mime = guessMime(item.name);
+    const objUrl = bufferToObjectURL(buffer, mime);
+    createdUrls.push(objUrl);
+    try { pages.push(await loadImageSize(objUrl)); } catch (_) {}
+  }
+  return pages;
 }
 
 async function startLoad() {
@@ -42,54 +66,37 @@ async function startLoad() {
 
   hideError();
   loading = true;
+  bgAbort = false;
   loadBtn.disabled = true;
   showScreen("loading");
-  setLoading("フォルダを解析中...", "");
+  setLoading("フォルダ情報を取得中...", "初回だけ少し時間がかかることがあります");
 
   try {
     const fileList = await loadMegaFolder(url, (msg) => setLoading(msg, ""));
-    const pages = [];
+    if (fileList.length === 0) throw new Error("表示できるファイルがありません");
 
-    for (let i = 0; i < fileList.length; i++) {
-      const item = fileList[i];
-      setLoading(`ダウンロード中 (${i + 1}/${fileList.length})`, item.path);
-      let buffer;
+    // --- 最初の数ファイルだけ先に落とす ---
+    const first = fileList.slice(0, FIRST_BATCH);
+    const rest = fileList.slice(FIRST_BATCH);
+    const firstPages = [];
+
+    for (let i = 0; i < first.length; i++) {
+      setLoading(`すぐ表示するページを準備中 (${i + 1}/${first.length})`, first[i].path);
       try {
-        buffer = await downloadFile(item.file);
+        const pages = await processFile(first[i]);
+        firstPages.push(...pages);
       } catch (e) {
-        console.warn("スキップ:", item.path, e);
-        continue;
-      }
-
-      if (item.isPdf) {
-        setLoading(`PDFを変換中: ${item.name}`, "");
-        try {
-          const pdfUrls = await renderPdfPages(buffer, (page, total) => {
-            setLoading(`PDF変換中 (${page}/${total})`, item.name);
-          });
-          createdUrls.push(...pdfUrls);
-          for (const u of pdfUrls) {
-            try { pages.push(await loadImageSize(u)); } catch (e) {}
-          }
-        } catch (e) {
-          console.warn("PDF変換失敗:", item.name, e);
-        }
-      } else {
-        const mime = guessMime(item.name);
-        const objUrl = bufferToObjectURL(buffer, mime);
-        createdUrls.push(objUrl);
-        try { pages.push(await loadImageSize(objUrl)); } catch (e) {}
+        console.warn("スキップ:", first[i].path, e);
       }
     }
 
-    if (pages.length === 0) {
+    if (firstPages.length === 0) {
       throw new Error("表示できるページがありませんでした");
     }
 
-    setLoading("ビューアを準備中...", "");
+    // --- すぐビューアを開く ---
     showScreen("viewer");
     if (viewer) viewer.destroy();
-
     viewer = new ComicViewer({
       container: document.getElementById("viewer"),
       slotLeft: document.getElementById("page-left"),
@@ -98,7 +105,12 @@ async function startLoad() {
       slider: document.getElementById("page-slider"),
       onExit: resetToStart,
     });
-    viewer.setPages(pages);
+    viewer.setPages(firstPages);
+
+    // --- 残りは裏で並列ダウンロード ---
+    if (rest.length > 0) {
+      loadRestInBackground(rest);
+    }
   } catch (err) {
     console.error(err);
     showError(err.message || "読み込みに失敗しました");
@@ -109,7 +121,31 @@ async function startLoad() {
   }
 }
 
+async function loadRestInBackground(fileList) {
+  let idx = 0;
+  async function worker() {
+    while (idx < fileList.length && !bgAbort) {
+      const i = idx++;
+      const item = fileList[i];
+      try {
+        const pages = await processFile(item);
+        if (pages.length && viewer && !bgAbort) {
+          viewer.appendPages(pages);
+        }
+      } catch (e) {
+        console.warn("裏読み込みスキップ:", item.path, e);
+      }
+    }
+  }
+  const workers = [];
+  for (let w = 0; w < Math.min(PARALLEL, fileList.length); w++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+}
+
 function resetToStart() {
+  bgAbort = true;
   if (viewer) { viewer.destroy(); viewer = null; }
   for (const u of createdUrls) {
     try { URL.revokeObjectURL(u); } catch (_) {}
@@ -138,4 +174,4 @@ function showError(msg) {
 function hideError() {
   errorMsg.classList.add("hidden");
   errorMsg.textContent = "";
-  }
+}
