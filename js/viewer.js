@@ -1,5 +1,7 @@
 import { isWide } from "./utils.js";
 
+const MODE_KEY = "mcv_view_mode";
+
 export class ComicViewer {
   constructor(opts) {
     this.container = opts.container;
@@ -11,6 +13,7 @@ export class ComicViewer {
     this.pages = [];
     this.spreads = [];
     this.currentSpread = 0;
+    this.mode = localStorage.getItem(MODE_KEY) === "single" ? "single" : "spread";
     this._boundKey = this._onKey.bind(this);
     this._boundClickLeft = () => this.next();
     this._boundClickRight = () => this.prev();
@@ -26,18 +29,50 @@ export class ComicViewer {
     this.currentSpread = 0;
     this._updateSlider();
     this._bindEvents();
+    this._updateModeButton();
     this.render();
   }
 
-  /** 追加ページを後ろに足す（裏読み込み用） */
   appendPages(pageList) {
-    const keepSpread = this.currentSpread;
+    const keep = this.currentSpread;
     const mapped = pageList.map((p) => ({ ...p, wide: isWide(p.width, p.height) }));
     this.pages.push(...mapped);
     this._buildSpreads();
-    this.currentSpread = Math.min(keepSpread, Math.max(0, this.spreads.length - 1));
+    this.currentSpread = Math.min(keep, Math.max(0, this.spreads.length - 1));
     this._updateSlider();
     this._updateInfo();
+  }
+
+  toggleMode() {
+    this.mode = this.mode === "spread" ? "single" : "spread";
+    localStorage.setItem(MODE_KEY, this.mode);
+    const keepPage = this._currentPageIndex();
+    this._buildSpreads();
+    this.currentSpread = this._spreadIndexForPage(keepPage);
+    this._updateSlider();
+    this._updateModeButton();
+    this.render();
+    this._showUITemporarily();
+  }
+
+  _currentPageIndex() {
+    if (!this.spreads.length) return 0;
+    const s = this.spreads[this.currentSpread];
+    if (s.type === "single") return s.indices[0];
+    return Math.min(...s.indices);
+  }
+
+  _spreadIndexForPage(pageIndex) {
+    for (let i = 0; i < this.spreads.length; i++) {
+      if (this.spreads[i].indices.includes(pageIndex)) return i;
+    }
+    return 0;
+  }
+
+  _updateModeButton() {
+    const btn = document.getElementById("mode-btn");
+    if (!btn) return;
+    btn.textContent = this.mode === "spread" ? "見開き" : "1枚";
   }
 
   _updateSlider() {
@@ -50,6 +85,14 @@ export class ComicViewer {
     this.spreads = [];
     let i = 0;
     const n = this.pages.length;
+
+    if (this.mode === "single") {
+      for (let p = 0; p < n; p++) {
+        this.spreads.push({ type: "single", indices: [p] });
+      }
+      return;
+    }
+
     while (i < n) {
       const page = this.pages[i];
       if (page.wide) {
@@ -148,6 +191,10 @@ export class ComicViewer {
       case "F":
         this._toggleFullscreen();
         break;
+      case "m":
+      case "M":
+        this.toggleMode();
+        break;
     }
   }
 
@@ -182,6 +229,8 @@ export class ComicViewer {
     screen.addEventListener("touchend", (e) => this._onTouchEnd(e), { passive: true });
     document.getElementById("back-btn").onclick = () => this.onExit();
     document.getElementById("fullscreen-btn").onclick = () => this._toggleFullscreen();
+    const modeBtn = document.getElementById("mode-btn");
+    if (modeBtn) modeBtn.onclick = () => this.toggleMode();
   }
 
   _showUITemporarily() {
@@ -204,4 +253,4 @@ export class ComicViewer {
     clearTimeout(this._uiTimer);
     this._eventsBound = false;
   }
-  }
+}
