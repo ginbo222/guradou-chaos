@@ -46,7 +46,30 @@ async function sha256(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function getShelf() {
+// my_site_folders.txt からテキストデータを自動読み込みして配列化する関数
+async function fetchTxtFolders() {
+  try {
+    const res = await fetch("./my_site_folders.txt");
+    if (!res.ok) return [];
+    const text = await res.text();
+    const items = [];
+    const lines = text.trim().split("\n");
+    lines.forEach((line) => {
+      if (!line.trim()) return;
+      const commaIdx = line.lastIndexOf("http");
+      if (commaIdx !== -1) {
+        let name = line.substring(0, commaIdx).replace(/,$/, "").trim();
+        let url = line.substring(commaIdx).trim();
+        items.push({ name, url });
+      }
+    });
+    return items;
+  } catch {
+    return [];
+  }
+}
+
+function getLocalShelf() {
   try {
     return JSON.parse(localStorage.getItem(SHELF_KEY) || "[]");
   } catch {
@@ -66,15 +89,26 @@ function showScreen(name) {
   viewerScreen.classList.toggle("hidden", name !== "viewer");
 }
 
-function renderShelf() {
-  const list = getShelf();
+async function renderShelf() {
+  const localList = getLocalShelf();
+  const txtList = await fetchTxtFolders();
+
+  // 重複を避けつつ txt の290個と手動追加分を合体
+  const combined = [...localList];
+  txtList.forEach((txtItem) => {
+    if (!combined.some((item) => item.url === txtItem.url)) {
+      combined.push(txtItem);
+    }
+  });
+
   shelfList.innerHTML = "";
-  if (list.length === 0) {
+  if (combined.length === 0) {
     shelfList.innerHTML =
       '<p class="empty-shelf">まだフォルダがありません<br>下のボタンから追加してください</p>';
     return;
   }
-  list.forEach((item, index) => {
+
+  combined.forEach((item, index) => {
     const row = document.createElement("div");
     row.className = "shelf-item";
     const nameEl = document.createElement("span");
@@ -87,8 +121,8 @@ function renderShelf() {
     del.addEventListener("click", (e) => {
       e.stopPropagation();
       if (confirm("「" + item.name + "」を削除しますか？")) {
-        const next = getShelf().filter((_, i) => i !== index);
-        saveShelf(next);
+        const nextLocal = getLocalShelf().filter((loc) => loc.url !== item.url);
+        saveShelf(nextLocal);
         renderShelf();
       }
     });
@@ -279,7 +313,7 @@ addFolderBtn.addEventListener("click", () => {
   addError.classList.add("hidden");
   showScreen("add");
 });
-cancelAddBtn.addEventListener("click", () => showScreen("start"));
+cancelAddBtn.addEventListener("click", showScreen("start"));
 lockBtn.addEventListener("click", lockApp);
 
 saveFolderBtn.addEventListener("click", () => {
@@ -295,7 +329,7 @@ saveFolderBtn.addEventListener("click", () => {
     addError.classList.remove("hidden");
     return;
   }
-  const list = getShelf();
+  const list = getLocalShelf();
   list.push({ name, url });
   saveShelf(list);
   renderShelf();
