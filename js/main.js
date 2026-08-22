@@ -46,10 +46,26 @@ async function sha256(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// my_site_folders.txt からテキストデータを自動読み込みして配列化する関数
+// MEGAのURLに含まれる余分なファイルサブパス (/folder/... 等) を除外して正規化する関数
+function sanitizeMegaUrl(rawUrl) {
+  if (!rawUrl) return "";
+  let cleanUrl = rawUrl.trim();
+  // URL内に含まれる2つ目以降の /folder/ や /file/ 以降をカットして純粋なフォルダURLにする
+  const subFolderIndex = cleanUrl.indexOf("/folder/", cleanUrl.indexOf("#"));
+  if (subFolderIndex !== -1) {
+    cleanUrl = cleanUrl.substring(0, subFolderIndex);
+  }
+  const subFileIndex = cleanUrl.indexOf("/file/", cleanUrl.indexOf("#"));
+  if (subFileIndex !== -1) {
+    cleanUrl = cleanUrl.substring(0, subFileIndex);
+  }
+  return cleanUrl;
+}
+
+// my_site_folders.txt の自動読み込み＆補正
 async function fetchTxtFolders() {
   try {
-    const res = await fetch("./my_site_folders.txt");
+    const res = await fetch("./my_site_folders.txt?v=" + Date.now());
     if (!res.ok) return [];
     const text = await res.text();
     const items = [];
@@ -59,8 +75,11 @@ async function fetchTxtFolders() {
       const commaIdx = line.lastIndexOf("http");
       if (commaIdx !== -1) {
         let name = line.substring(0, commaIdx).replace(/,$/, "").trim();
-        let url = line.substring(commaIdx).trim();
-        items.push({ name, url });
+        let rawUrl = line.substring(commaIdx).trim();
+        let url = sanitizeMegaUrl(rawUrl);
+        if (url) {
+          items.push({ name, url });
+        }
       }
     });
     return items;
@@ -90,10 +109,11 @@ function showScreen(name) {
 }
 
 async function renderShelf() {
+  shelfList.innerHTML = '<p class="empty-shelf">本棚を読み込み中...</p>';
+  
   const localList = getLocalShelf();
   const txtList = await fetchTxtFolders();
 
-  // 重複を避けつつ txt の290個と手動追加分を合体
   const combined = [...localList];
   txtList.forEach((txtItem) => {
     if (!combined.some((item) => item.url === txtItem.url)) {
@@ -157,22 +177,22 @@ async function handleAuth() {
   if (authMode === "setup") {
     localStorage.setItem(PASS_KEY, hash);
     sessionStorage.setItem(SESSION_KEY, "1");
-    enterApp();
+    await enterApp();
     return;
   }
   const saved = localStorage.getItem(PASS_KEY);
   if (hash === saved) {
     sessionStorage.setItem(SESSION_KEY, "1");
-    enterApp();
+    await enterApp();
   } else {
     authError.textContent = "パスワードが違います";
     authError.classList.remove("hidden");
   }
 }
 
-function enterApp() {
-  renderShelf();
+async function enterApp() {
   showScreen("start");
+  await renderShelf();
 }
 
 function lockApp() {
@@ -211,7 +231,8 @@ async function openFolder(url, name) {
   setLoading("フォルダ情報を取得中...", name || "");
 
   try {
-    const fileList = await loadMegaFolder(url, (msg) => setLoading(msg, name || ""));
+    const targetUrl = sanitizeMegaUrl(url);
+    const fileList = await loadMegaFolder(targetUrl, (msg) => setLoading(msg, name || ""));
     if (fileList.length === 0) throw new Error("表示できるファイルがありません");
 
     const first = fileList.slice(0, FIRST_BATCH);
@@ -292,10 +313,10 @@ function resetViewerState() {
   createdUrls = [];
 }
 
-function backToShelf() {
+async function backToShelf() {
   resetViewerState();
-  renderShelf();
   showScreen("start");
+  await renderShelf();
 }
 
 function setLoading(text, progress) {
@@ -313,12 +334,13 @@ addFolderBtn.addEventListener("click", () => {
   addError.classList.add("hidden");
   showScreen("add");
 });
-cancelAddBtn.addEventListener("click", showScreen("start"));
+cancelAddBtn.addEventListener("click", () => showScreen("start"));
 lockBtn.addEventListener("click", lockApp);
 
-saveFolderBtn.addEventListener("click", () => {
+saveFolderBtn.addEventListener("click", async () => {
   const name = folderName.value.trim();
-  const url = folderUrl.value.trim();
+  const rawUrl = folderUrl.value.trim();
+  const url = sanitizeMegaUrl(rawUrl);
   if (!name) {
     addError.textContent = "名前を入力してください";
     addError.classList.remove("hidden");
@@ -332,8 +354,8 @@ saveFolderBtn.addEventListener("click", () => {
   const list = getLocalShelf();
   list.push({ name, url });
   saveShelf(list);
-  renderShelf();
   showScreen("start");
+  await renderShelf();
 });
 
 if (sessionStorage.getItem(SESSION_KEY) === "1" && localStorage.getItem(PASS_KEY)) {
