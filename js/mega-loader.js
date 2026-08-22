@@ -1,18 +1,16 @@
-import { File } from "./megajs.esm.js";
+import { File } from "https://unpkg.com/megajs@1.3.0/dist/main.browser-esm.js";
 
 export async function loadMegaFolder(url, onProgress) {
   if (onProgress) onProgress("MEGAフォルダの解析中...");
 
-  // URLから純粋なフォルダ情報だけを抽出する
   let cleanUrl = url.trim();
 
-  // # の位置を探す
+  // URLから不要なパラメータを除去して正しいキー情報のみを取り出す
   const hashIdx = cleanUrl.indexOf("#");
   if (hashIdx !== -1) {
     const baseUrl = cleanUrl.substring(0, hashIdx);
     let keyPart = cleanUrl.substring(hashIdx + 1);
 
-    // キーの後ろについている余計なスラッシュやフォルダ指定 (/folder/...) を全て切り捨てる
     const slashIdx = keyPart.search(/[\/\s?]/);
     if (slashIdx !== -1) {
       keyPart = keyPart.substring(0, slashIdx);
@@ -52,7 +50,6 @@ export async function loadMegaFolder(url, onProgress) {
 
   traverse(folder);
 
-  // 自然順ソート（1, 2, 10 などの順番を正しくする）
   files.sort((a, b) =>
     a.path.localeCompare(b.path, undefined, { numeric: true, sensitivity: "base" })
   );
