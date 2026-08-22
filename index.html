@@ -1,58 +1,252 @@
-<!DOCTYPE html>
+<!<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>本棚ビューア</title>
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+
+  <title>マイライブラリ</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #111;
+      color: #fff;
+      font-family: sans-serif;
+    }
+
+    header {
+      padding: 18px;
+      background: #1c1c1c;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+    }
+
+    #content {
+      padding: 15px;
+    }
+
+    .folder {
+      background: #222;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 12px;
+      font-size: 18px;
+      cursor: pointer;
+    }
+
+    .folder:active {
+      transform: scale(0.98);
+    }
+
+    .file {
+      background: #1e1e1e;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 8px;
+    }
+
+    .back {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 10px 15px;
+      background: #333;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .loading {
+      opacity: 0.7;
+      padding: 20px 0;
+    }
+
+    .error {
+      color: #ff7777;
+      padding: 20px 0;
+    }
+  </style>
 </head>
+
 <body>
-  <div id="auth-screen" class="screen">
-    <h2 id="auth-title">パスワード</h2>
-    <p id="auth-sub">入室用パスワードを入力</p>
-    <input type="password" id="auth-input" placeholder="パスワード">
-    <button id="auth-btn" type="button">入室</button>
-    <p id="auth-error" class="error hidden"></p>
-  </div>
 
-  <div id="start-screen" class="screen hidden">
-    <header class="header">
-      <h1>本棚</h1>
-      <button id="lock-btn" type="button" class="icon-btn">🔒</button>
-    </header>
-    <div id="shelf-list" class="shelf-list"></div>
-    <button id="add-folder-btn" type="button" class="fab">+</button>
-  </div>
+<header>
+  <h1 id="title">📚 マイライブラリ</h1>
+</header>
 
-  <div id="add-screen" class="screen hidden">
-    <h2>フォルダ追加</h2>
-    <input type="text" id="folder-name" placeholder="名前">
-    <input type="text" id="folder-url" placeholder="MEGA URL">
-    <div class="btn-group">
-      <button id="save-folder-btn" type="button">保存</button>
-      <button id="cancel-add-btn" type="button" class="secondary">キャンセル</button>
-    </div>
-    <p id="add-error" class="error hidden"></p>
-  </div>
+<main id="content">
+  <div class="loading">読み込み中…</div>
+</main>
 
-  <div id="loading-screen" class="screen hidden">
-    <div class="spinner"></div>
-    <p id="loading-text">読み込み中...</p>
-    <p id="loading-progress"></p>
-  </div>
+<script>
 
-  <div id="viewer-screen" class="screen hidden">
-    <div id="viewer" class="viewer">
-      <div id="page-left" class="page-slot"></div>
-      <div id="page-right" class="page-slot"></div>
-    </div>
-    <footer class="viewer-footer">
-      <span id="page-info">0 / 0</span>
-      <input type="range" id="page-slider" min="1" max="1" value="1">
-    </footer>
-  </div>
+const content = document.getElementById("content");
+const title = document.getElementById("title");
 
-  <script type="module" src="js/main.js"></script>
+
+// -------------------------
+// ① フォルダ一覧
+// -------------------------
+
+async function loadFolders() {
+
+  content.innerHTML =
+    '<div class="loading">フォルダを読み込み中…</div>';
+
+  try {
+
+    const response = await fetch("/api/folders");
+
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.error);
+    }
+
+    content.innerHTML = "";
+
+    data.folders.forEach(folder => {
+
+      const element = document.createElement("div");
+
+      element.className = "folder";
+
+      element.textContent = "📁 " + folder.name;
+
+      element.onclick = () =>
+        loadFolder(folder.name);
+
+      content.appendChild(element);
+
+    });
+
+  } catch (error) {
+
+    content.innerHTML =
+      '<div class="error">読み込みエラー: '
+      + error.message
+      + '</div>';
+
+  }
+}
+
+
+// -------------------------
+// ② フォルダの中身
+// -------------------------
+
+async function loadFolder(name) {
+
+  title.textContent = "📁 " + name;
+
+  content.innerHTML =
+    '<div class="loading">読み込み中…</div>';
+
+  try {
+
+    const response =
+      await fetch(
+        "/api/folder?name="
+        + encodeURIComponent(name)
+      );
+
+    const data = await response.json();
+
+    if (!data.success) {
+      throw new Error(data.error);
+    }
+
+    content.innerHTML = "";
+
+    const back = document.createElement("div");
+
+    back.className = "back";
+
+    back.textContent = "← フォルダ一覧";
+
+    back.onclick = () => {
+
+      title.textContent =
+        "📚 マイライブラリ";
+
+      loadFolders();
+
+    };
+
+    content.appendChild(back);
+
+
+    data.files.forEach(file => {
+
+      const element =
+        document.createElement("div");
+
+      element.className = "file";
+
+      if (file.directory) {
+
+        element.textContent =
+          "📁 " + file.name;
+
+      } else {
+
+        const lower =
+          file.name.toLowerCase();
+
+        if (lower.endsWith(".pdf")) {
+
+          element.textContent =
+            "📕 " + file.name;
+
+        } else if (
+          lower.endsWith(".jpg") ||
+          lower.endsWith(".jpeg") ||
+          lower.endsWith(".png") ||
+          lower.endsWith(".webp") ||
+          lower.endsWith(".gif")
+        ) {
+
+          element.textContent =
+            "🖼️ " + file.name;
+
+        } else {
+
+          element.textContent =
+            "📄 " + file.name;
+
+        }
+
+      }
+
+      content.appendChild(element);
+
+    });
+
+  } catch (error) {
+
+    content.innerHTML =
+      '<div class="error">読み込みエラー: '
+      + error.message
+      + '</div>';
+
+  }
+
+}
+
+
+// 最初にフォルダだけ取得
+
+loadFolders();
+
+</script>
+
 </body>
 </html>
