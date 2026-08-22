@@ -1,39 +1,43 @@
-let pdfjsLib = null;
+// pdf.js の worker を設定
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
 
-async function ensurePdfJs() {
-  if (pdfjsLib) return pdfjsLib;
-  try {
-    pdfjsLib = await import("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs");
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs";
-    return pdfjsLib;
-  } catch (e) {
-    console.error(e);
-    throw new Error("PDF.js の読み込みに失敗しました。ネットワークを確認してください。");
-  }
-}
-
-export async function renderPdfPages(buffer, onProgress = () => {}) {
-  const pdfjs = await ensurePdfJs();
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+export async function renderPdfPages(buffer) {
+  const loadingTask = pdfjsLib.getDocument({ data: buffer });
   const pdf = await loadingTask.promise;
-  const total = pdf.numPages;
-  const urls = [];
-  const scale = 2.0;
+  const pageUrls = [];
 
-  for (let i = 1; i <= total; i++) {
-    onProgress(i, total);
+  // メモリ負荷を減らすため、キャンバスの解像度スケールを1.5に調整
+  const scale = 1.5;
+
+  for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const viewport = page.getViewport({ scale });
+
     const canvas = document.createElement("canvas");
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext("2d");
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
-    if (!blob) throw new Error("PDFページの変換に失敗しました");
-    urls.push(URL.createObjectURL(blob));
-    try { page.cleanup?.(); } catch (_) {}
+    const context = canvas.getContext("2d");
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+
+    const renderContext = {
+      canvasContext: context,
+      viewport: viewport,
+    };
+
+    await page.render(renderContext).promise;
+
+    // 画像化してBlob URLを作成
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.8)
+    );
+    if (blob) {
+      pageUrls.push(URL.createObjectURL(blob));
+    }
+
+    // キャンバスのメモリ解放
+    canvas.width = 0;
+    canvas.height = 0;
   }
-  return urls;
+
+  return pageUrls;
 }
