@@ -1,11 +1,11 @@
-import { File } from "https://unpkg.com/megajs@1.3.0/dist/main.browser-esm.js";
+import { File } from "./megajs.esm.js";
 
 export async function loadMegaFolder(url, onProgress) {
   if (onProgress) onProgress("MEGAフォルダの解析中...");
 
   let cleanUrl = url.trim();
 
-  // URLから不要なパラメータを除去して正しいキー情報のみを取り出す
+  // URLから不要なフォルダ指定などを切り落とす処理
   const hashIdx = cleanUrl.indexOf("#");
   if (hashIdx !== -1) {
     const baseUrl = cleanUrl.substring(0, hashIdx);
