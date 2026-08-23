@@ -2,7 +2,7 @@ import { naturalCompare, isSupportedFile, isPdf, getExt } from "./utils.js";
 
 function getMegaFile() {
   if (!window.mega || !window.mega.File) {
-    throw new Error("megajs の読み込みに失敗しました。ネットワークを確認して再読み込みしてください。");
+    throw new Error("megajs の読み込みに失敗しました。再読み込みしてください。");
   }
   return window.mega.File;
 }
@@ -11,15 +11,13 @@ async function loadRootFolder(url) {
   const File = getMegaFile();
   const root = File.fromURL(url);
   if (root.api) root.api.userAgent = null;
-
   let loaded;
   try {
     loaded = await root.loadAttributes();
   } catch (e) {
     console.error(e);
-    throw new Error("フォルダの取得に失敗しました。リンクと復号キー(#以降)を確認してください。");
+    throw new Error("フォルダの取得に失敗しました。リンクと#以降のキーを確認してください。");
   }
-
   const folder = loaded && loaded.directory ? loaded : root;
   if (!folder.directory && !folder.children) {
     return { folder, isSingleFile: true };
@@ -27,117 +25,10 @@ async function loadRootFolder(url) {
   return { folder, isSingleFile: false };
 }
 
-/**
- * 親フォルダ直下の「対応ファイル」（PDF・画像）を一覧
- */
-export async function listChildFiles(url, onProgress = () => {}) {
-  onProgress("親フォルダ情報を取得中...");
-  const { folder, isSingleFile } = await loadRootFolder(url);
-
-  if (isSingleFile) {
-    const name = folder.name || "file";
-    if (isSupportedFile(name)) {
-      return [{ name, isPdf: isPdf(name) }];
-    }
-    throw new Error("サポートされていないファイルです");
-  }
-
-  if (!folder.children || folder.children.length === 0) {
-    return [];
-  }
-
-  const files = folder.children
-    .filter((c) => !c.directory && isSupportedFile(c.name || ""))
-    .map((c) => ({
-      name: c.name || "(名前なし)",
-      isPdf: isPdf(c.name || ""),
-    }))
-    .sort((a, b) => naturalCompare(a.name, b.name));
-
-  onProgress(files.length + " 個のファイルを発見");
-  return files;
-}
-
-/**
- * 親フォルダ直下のフォルダ一覧（以前の機能用）
- */
-export async function listChildFolders(url, onProgress = () => {}) {
-  onProgress("親フォルダ情報を取得中...");
-  const { folder, isSingleFile } = await loadRootFolder(url);
-  if (isSingleFile) {
-    throw new Error("これはファイルリンクです。フォルダのリンクを指定してください。");
-  }
-  if (!folder.children || folder.children.length === 0) return [];
-
-  const dirs = folder.children
-    .filter((c) => c.directory)
-    .map((c) => ({ name: c.name || "(名前なし)" }))
-    .sort((a, b) => naturalCompare(a.name, b.name));
-
-  onProgress(dirs.length + " 個のフォルダを発見");
-  return dirs;
-}
-
-/**
- * options.onlyFileName … 直下のそのファイルだけ
- * options.onlyChildName … 直下のそのフォルダの中だけ
- */
-export async function loadMegaFolder(url, onProgress = () => {}, options = {}) {
-  onProgress("フォルダ情報を取得中...");
-  const { folder, isSingleFile } = await loadRootFolder(url);
-
-  if (isSingleFile) {
-    const name = folder.name || "file";
-    if (isSupportedFile(name)) {
-      return [{ name, path: name, file: folder, isPdf: isPdf(name) }];
-    }
-    throw new Error("サポートされていないファイル形式です（画像・PDFのみ）");
-  }
-
-  onProgress("ファイル一覧を収集中...");
-  const collected = [];
-
-  if (options.onlyFileName) {
-    const f = (folder.children || []).find(
-      (c) => !c.directory && c.name === options.onlyFileName
-    );
-    if (!f) {
-      throw new Error("ファイルが見つかりません: " + options.onlyFileName);
-    }
-    if (!isSupportedFile(f.name || "")) {
-      throw new Error("未対応のファイルです: " + f.name);
-    }
-    collected.push({
-      name: f.name,
-      path: f.name,
-      file: f,
-      isPdf: isPdf(f.name),
-    });
-  } else if (options.onlyChildName) {
-    const child = (folder.children || []).find(
-      (c) => c.directory && c.name === options.onlyChildName
-    );
-    if (!child) {
-      throw new Error("子フォルダが見つかりません: " + options.onlyChildName);
-    }
-    collectFiles(child, child.name || "", collected);
-  } else {
-    collectFiles(folder, "", collected);
-  }
-
-  collected.sort((a, b) => naturalCompare(a.path, b.path));
-
-  if (collected.length === 0) {
-    throw new Error("画像またはPDFが見つかりませんでした");
-  }
-
-  onProgress("ファイル " + collected.length + " 件を発見");
-  return collected;
-}
-
-function collectFiles(node, parentPath, out) {
-  if (!node.children || node.children.length === 0) {
-    if (!node.directory && isSupportedFile(node.name || "")) {
+function walkFiles(node, parentPath, out) {
+  if (!node) return;
+  if (!node.directory) {
+    if (isSupportedFile(node.name || "")) {
       const path = parentPath ? parentPath + "/" + node.name : node.name;
       out.push({
         name: node.name,
@@ -148,18 +39,15 @@ function collectFiles(node, parentPath, out) {
     }
     return;
   }
-
-  const children = [...node.children].sort((a, b) =>
+  const children = [...(node.children || [])].sort((a, b) =>
     naturalCompare(a.name || "", b.name || "")
   );
-
   for (const child of children) {
     const childPath = parentPath
       ? parentPath + "/" + (child.name || "")
       : child.name || "";
-
     if (child.directory) {
-      collectFiles(child, childPath, out);
+      walkFiles(child, childPath, out);
     } else if (isSupportedFile(child.name || "")) {
       out.push({
         name: child.name,
@@ -169,6 +57,84 @@ function collectFiles(node, parentPath, out) {
       });
     }
   }
+}
+
+/** 親以下の全PDF・画像を一覧（サブフォルダ含む） */
+export async function listAllFiles(url, onProgress = () => {}) {
+  onProgress("フォルダ情報を取得中...");
+  const { folder, isSingleFile } = await loadRootFolder(url);
+
+  if (isSingleFile) {
+    const name = folder.name || "file";
+    if (!isSupportedFile(name)) throw new Error("未対応のファイルです");
+    return [{ name, path: name, isPdf: isPdf(name) }];
+  }
+
+  onProgress("ファイルを検索中...");
+  const collected = [];
+  walkFiles(folder, "", collected);
+  collected.sort((a, b) => naturalCompare(a.path, b.path));
+  onProgress(collected.length + " 個のファイルを発見");
+  return collected.map((c) => ({
+    name: c.name,
+    path: c.path,
+    isPdf: c.isPdf,
+  }));
+}
+
+/**
+ * options.onlyFilePath … そのパスのファイル1つだけ
+ * options.onlyChildName … 直下フォルダ名の中だけ（旧）
+ */
+export async function loadMegaFolder(url, onProgress = () => {}, options = {}) {
+  onProgress("フォルダ情報を取得中...");
+  const { folder, isSingleFile } = await loadRootFolder(url);
+
+  if (isSingleFile) {
+    const name = folder.name || "file";
+    if (!isSupportedFile(name)) {
+      throw new Error("サポートされていないファイル形式です");
+    }
+    return [{ name, path: name, file: folder, isPdf: isPdf(name) }];
+  }
+
+  onProgress("ファイルを特定中...");
+  const collected = [];
+  walkFiles(folder, "", collected);
+
+  if (options.onlyFilePath) {
+    const hit = collected.find((c) => c.path === options.onlyFilePath);
+    if (!hit) {
+      throw new Error("ファイルが見つかりません: " + options.onlyFilePath);
+    }
+    return [hit];
+  }
+
+  if (options.onlyChildName) {
+    const filtered = collected.filter(
+      (c) =>
+        c.path === options.onlyChildName ||
+        c.path.startsWith(options.onlyChildName + "/")
+    );
+    if (filtered.length === 0) {
+      throw new Error("フォルダ内にファイルがありません: " + options.onlyChildName);
+    }
+    filtered.sort((a, b) => naturalCompare(a.path, b.path));
+    return filtered;
+  }
+
+  if (options.onlyFileName) {
+    const hit = collected.find((c) => c.name === options.onlyFileName);
+    if (!hit) throw new Error("ファイルが見つかりません: " + options.onlyFileName);
+    return [hit];
+  }
+
+  collected.sort((a, b) => naturalCompare(a.path, b.path));
+  if (collected.length === 0) {
+    throw new Error("画像またはPDFが見つかりませんでした");
+  }
+  onProgress("ファイル " + collected.length + " 件を発見");
+  return collected;
 }
 
 export async function downloadFile(megaFile) {
