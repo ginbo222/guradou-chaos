@@ -1,4 +1,4 @@
-import { loadMegaFolder, downloadFile, guessMime } from "./mega-loader.js";
+import { loadMegaFolder, listChildFolders, downloadFile, guessMime } from "./mega-loader.js";
 import { renderPdfPages } from "./pdf-renderer.js";
 import { bufferToObjectURL, loadImageSize } from "./utils.js";
 import { ComicViewer } from "./viewer.js";
@@ -6,6 +6,7 @@ import { ComicViewer } from "./viewer.js";
 const authScreen = document.getElementById("auth-screen");
 const startScreen = document.getElementById("start-screen");
 const addScreen = document.getElementById("add-screen");
+const bulkScreen = document.getElementById("bulk-screen");
 const loadingScreen = document.getElementById("loading-screen");
 const viewerScreen = document.getElementById("viewer-screen");
 
@@ -17,12 +18,22 @@ const authError = document.getElementById("auth-error");
 
 const shelfList = document.getElementById("shelf-list");
 const addFolderBtn = document.getElementById("add-folder-btn");
+const bulkFolderBtn = document.getElementById("bulk-folder-btn");
 const lockBtn = document.getElementById("lock-btn");
+
 const folderName = document.getElementById("folder-name");
 const folderUrl = document.getElementById("folder-url");
 const saveFolderBtn = document.getElementById("save-folder-btn");
 const cancelAddBtn = document.getElementById("cancel-add-btn");
 const addError = document.getElementById("add-error");
+
+const bulkUrl = document.getElementById("bulk-url");
+const bulkFetchBtn = document.getElementById("bulk-fetch-btn");
+const bulkCancelBtn = document.getElementById("bulk-cancel-btn");
+const bulkAddAllBtn = document.getElementById("bulk-add-all-btn");
+const bulkList = document.getElementById("bulk-list");
+const bulkStatus = document.getElementById("bulk-status");
+const bulkError = document.getElementById("bulk-error");
 
 const loadingText = document.getElementById("loading-text");
 const loadingProgress = document.getElementById("loading-progress");
@@ -39,6 +50,8 @@ let createdUrls = [];
 let loading = false;
 let bgAbort = false;
 let authMode = "login";
+let bulkParentUrl = "";
+let bulkChildren = [];
 
 async function sha256(text) {
   const data = new TextEncoder().encode(text);
@@ -62,6 +75,7 @@ function showScreen(name) {
   authScreen.classList.toggle("hidden", name !== "auth");
   startScreen.classList.toggle("hidden", name !== "start");
   addScreen.classList.toggle("hidden", name !== "add");
+  bulkScreen.classList.toggle("hidden", name !== "bulk");
   loadingScreen.classList.toggle("hidden", name !== "loading");
   viewerScreen.classList.toggle("hidden", name !== "viewer");
 }
@@ -71,7 +85,7 @@ function renderShelf() {
   shelfList.innerHTML = "";
   if (list.length === 0) {
     shelfList.innerHTML =
-      '<p class="empty-shelf">まだフォルダがありません<br>下のボタンから追加してください</p>';
+      '<p class="empty-shelf">まだフォルダがありません<br>「1件追加」または「一括登録」から追加</p>';
     return;
   }
   list.forEach((item, index) => {
@@ -94,7 +108,9 @@ function renderShelf() {
     });
     row.appendChild(nameEl);
     row.appendChild(del);
-    row.addEventListener("click", () => openFolder(item.url, item.name));
+    row.addEventListener("click", () =>
+      openFolder(item.url, item.name, item.childName || null)
+    );
     shelfList.appendChild(row);
   });
 }
@@ -126,8 +142,7 @@ async function handleAuth() {
     enterApp();
     return;
   }
-  const saved = localStorage.getItem(PASS_KEY);
-  if (hash === saved) {
+  if (hash === localStorage.getItem(PASS_KEY)) {
     sessionStorage.setItem(SESSION_KEY, "1");
     enterApp();
   } else {
@@ -169,7 +184,7 @@ async function processFile(item) {
   return pages;
 }
 
-async function openFolder(url, name) {
+async function openFolder(url, name, childName) {
   if (loading) return;
   loading = true;
   bgAbort = false;
@@ -177,7 +192,12 @@ async function openFolder(url, name) {
   setLoading("フォルダ情報を取得中...", name || "");
 
   try {
-    const fileList = await loadMegaFolder(url, (msg) => setLoading(msg, name || ""));
+    const opts = childName ? { onlyChildName: childName } : {};
+    const fileList = await loadMegaFolder(
+      url,
+      (msg) => setLoading(msg, name || ""),
+      opts
+    );
     if (fileList.length === 0) throw new Error("表示できるファイルがありません");
 
     const first = fileList.slice(0, FIRST_BATCH);
@@ -269,10 +289,85 @@ function setLoading(text, progress) {
   loadingProgress.textContent = progress || "";
 }
 
+// --- 一括登録 ---
+async function bulkFetch() {
+  const url = bulkUrl.value.trim();
+  bulkError.classList.add("hidden");
+  bulkList.innerHTML = "";
+  bulkAddAllBtn.classList.add("hidden");
+  bulkChildren = [];
+  bulkParentUrl = "";
+
+  if (!url || !/mega\.(nz|co\.nz)/i.test(url)) {
+    bulkError.textContent = "正しいMEGAフォルダリンクを入力してください";
+    bulkError.classList.remove("hidden");
+    return;
+  }
+
+  bulkFetchBtn.disabled = true;
+  bulkStatus.textContent = "取得中…（フォルダが多いと数分かかることがあります）";
+
+  try {
+    const dirs = await listChildFolders(url, (msg) => {
+      bulkStatus.textContent = msg;
+    });
+    if (dirs.length === 0) {
+      bulkStatus.textContent = "直下にフォルダがありませんでした";
+      return;
+    }
+    bulkParentUrl = url;
+    bulkChildren = dirs;
+    bulkStatus.textContent = dirs.length + " 個のフォルダが見つかりました";
+    bulkList.innerHTML = "";
+    dirs.forEach((d) => {
+      const row = document.createElement("div");
+      row.className = "bulk-item";
+      row.innerHTML = '<span class="name"></span>';
+      row.querySelector(".name").textContent = d.name;
+      bulkList.appendChild(row);
+    });
+    bulkAddAllBtn.classList.remove("hidden");
+    bulkAddAllBtn.textContent = dirs.length + " 件すべて本棚に追加";
+  } catch (e) {
+    console.error(e);
+    bulkError.textContent = e.message || "取得に失敗しました";
+    bulkError.classList.remove("hidden");
+    bulkStatus.textContent = "";
+  } finally {
+    bulkFetchBtn.disabled = false;
+  }
+}
+
+function bulkAddAll() {
+  if (!bulkParentUrl || bulkChildren.length === 0) return;
+  const list = getShelf();
+  const existing = new Set(
+    list.map((x) => (x.childName || "") + "\n" + x.url)
+  );
+  let added = 0;
+  for (const d of bulkChildren) {
+    const key = d.name + "\n" + bulkParentUrl;
+    if (existing.has(key)) continue;
+    list.push({
+      name: d.name,
+      url: bulkParentUrl,
+      childName: d.name,
+    });
+    existing.add(key);
+    added++;
+  }
+  saveShelf(list);
+  alert(added + " 件を本棚に追加しました（重複はスキップ）");
+  renderShelf();
+  showScreen("start");
+}
+
+// events
 authBtn.addEventListener("click", handleAuth);
 authInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleAuth();
 });
+
 addFolderBtn.addEventListener("click", () => {
   folderName.value = "";
   folderUrl.value = "";
@@ -301,6 +396,20 @@ saveFolderBtn.addEventListener("click", () => {
   renderShelf();
   showScreen("start");
 });
+
+bulkFolderBtn.addEventListener("click", () => {
+  bulkUrl.value = "";
+  bulkList.innerHTML = "";
+  bulkStatus.textContent = "";
+  bulkError.classList.add("hidden");
+  bulkAddAllBtn.classList.add("hidden");
+  bulkChildren = [];
+  bulkParentUrl = "";
+  showScreen("bulk");
+});
+bulkCancelBtn.addEventListener("click", () => showScreen("start"));
+bulkFetchBtn.addEventListener("click", bulkFetch);
+bulkAddAllBtn.addEventListener("click", bulkAddAll);
 
 if (sessionStorage.getItem(SESSION_KEY) === "1" && localStorage.getItem(PASS_KEY)) {
   enterApp();
