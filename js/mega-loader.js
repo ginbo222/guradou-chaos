@@ -1,4 +1,4 @@
- import { naturalCompare, isSupportedFile, isPdf, getExt } from "./utils.js";
+import { naturalCompare, isSupportedFile, isPdf, getExt } from "./utils.js";
 
 function getMegaFile() {
   if (!window.mega || !window.mega.File) {
@@ -28,7 +28,38 @@ async function loadRootFolder(url) {
 }
 
 /**
- * 親フォルダ直下の「フォルダだけ」を一覧
+ * 親フォルダ直下の「対応ファイル」（PDF・画像）を一覧
+ */
+export async function listChildFiles(url, onProgress = () => {}) {
+  onProgress("親フォルダ情報を取得中...");
+  const { folder, isSingleFile } = await loadRootFolder(url);
+
+  if (isSingleFile) {
+    const name = folder.name || "file";
+    if (isSupportedFile(name)) {
+      return [{ name, isPdf: isPdf(name) }];
+    }
+    throw new Error("サポートされていないファイルです");
+  }
+
+  if (!folder.children || folder.children.length === 0) {
+    return [];
+  }
+
+  const files = folder.children
+    .filter((c) => !c.directory && isSupportedFile(c.name || ""))
+    .map((c) => ({
+      name: c.name || "(名前なし)",
+      isPdf: isPdf(c.name || ""),
+    }))
+    .sort((a, b) => naturalCompare(a.name, b.name));
+
+  onProgress(files.length + " 個のファイルを発見");
+  return files;
+}
+
+/**
+ * 親フォルダ直下のフォルダ一覧（以前の機能用）
  */
 export async function listChildFolders(url, onProgress = () => {}) {
   onProgress("親フォルダ情報を取得中...");
@@ -36,9 +67,7 @@ export async function listChildFolders(url, onProgress = () => {}) {
   if (isSingleFile) {
     throw new Error("これはファイルリンクです。フォルダのリンクを指定してください。");
   }
-  if (!folder.children || folder.children.length === 0) {
-    return [];
-  }
+  if (!folder.children || folder.children.length === 0) return [];
 
   const dirs = folder.children
     .filter((c) => c.directory)
@@ -50,8 +79,8 @@ export async function listChildFolders(url, onProgress = () => {}) {
 }
 
 /**
- * 公開フォルダから画像・PDFを収集
- * options.onlyChildName がある場合、その直下子フォルダの中だけ
+ * options.onlyFileName … 直下のそのファイルだけ
+ * options.onlyChildName … 直下のそのフォルダの中だけ
  */
 export async function loadMegaFolder(url, onProgress = () => {}, options = {}) {
   onProgress("フォルダ情報を取得中...");
@@ -68,7 +97,23 @@ export async function loadMegaFolder(url, onProgress = () => {}, options = {}) {
   onProgress("ファイル一覧を収集中...");
   const collected = [];
 
-  if (options.onlyChildName) {
+  if (options.onlyFileName) {
+    const f = (folder.children || []).find(
+      (c) => !c.directory && c.name === options.onlyFileName
+    );
+    if (!f) {
+      throw new Error("ファイルが見つかりません: " + options.onlyFileName);
+    }
+    if (!isSupportedFile(f.name || "")) {
+      throw new Error("未対応のファイルです: " + f.name);
+    }
+    collected.push({
+      name: f.name,
+      path: f.name,
+      file: f,
+      isPdf: isPdf(f.name),
+    });
+  } else if (options.onlyChildName) {
     const child = (folder.children || []).find(
       (c) => c.directory && c.name === options.onlyChildName
     );
@@ -165,4 +210,4 @@ export function guessMime(name) {
     pdf: "application/pdf",
   };
   return map[ext] || "application/octet-stream";
-} 
+}
