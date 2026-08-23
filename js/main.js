@@ -1,4 +1,4 @@
-import { loadMegaFolder, listChildFolders, downloadFile, guessMime } from "./mega-loader.js";
+import { loadMegaFolder, listChildFiles, downloadFile, guessMime } from "./mega-loader.js";
 import { renderPdfPages } from "./pdf-renderer.js";
 import { bufferToObjectURL, loadImageSize } from "./utils.js";
 import { ComicViewer } from "./viewer.js";
@@ -51,8 +51,7 @@ let loading = false;
 let bgAbort = false;
 let authMode = "login";
 let bulkParentUrl = "";
-let bulkChildren = [];
-/** 履歴操作中フラグ（popstate との二重処理防止） */
+let bulkFiles = [];
 let historyLock = false;
 
 async function sha256(text) {
@@ -82,16 +81,12 @@ function showScreen(name) {
   viewerScreen.classList.toggle("hidden", name !== "viewer");
 }
 
-/** 画面を変えつつブラウザ履歴に積む */
 function goScreen(name, push) {
   showScreen(name);
   if (historyLock) return;
   try {
-    if (push) {
-      history.pushState({ screen: name }, "");
-    } else {
-      history.replaceState({ screen: name }, "");
-    }
+    if (push) history.pushState({ screen: name }, "");
+    else history.replaceState({ screen: name }, "");
   } catch (_) {}
 }
 
@@ -100,7 +95,7 @@ function renderShelf() {
   shelfList.innerHTML = "";
   if (list.length === 0) {
     shelfList.innerHTML =
-      '<p class="empty-shelf">まだフォルダがありません<br>「1件追加」または「一括登録」から追加</p>';
+      '<p class="empty-shelf">まだありません<br>「1件追加」または「親フォルダから一括登録」</p>';
     return;
   }
   list.forEach((item, index) => {
@@ -116,16 +111,13 @@ function renderShelf() {
     del.addEventListener("click", (e) => {
       e.stopPropagation();
       if (confirm("「" + item.name + "」を削除しますか？")) {
-        const next = getShelf().filter((_, i) => i !== index);
-        saveShelf(next);
+        saveShelf(getShelf().filter((_, i) => i !== index));
         renderShelf();
       }
     });
     row.appendChild(nameEl);
     row.appendChild(del);
-    row.addEventListener("click", () =>
-      openFolder(item.url, item.name, item.childName || null)
-    );
+    row.addEventListener("click", () => openItem(item));
     shelfList.appendChild(row);
   });
 }
@@ -199,19 +191,28 @@ async function processFile(item) {
   return pages;
 }
 
-async function openFolder(url, name, childName) {
+async function openItem(item) {
+  const opts = {};
+  if (item.kind === "file" && item.fileName) {
+    opts.onlyFileName = item.fileName;
+  } else if (item.childName) {
+    opts.onlyChildName = item.childName;
+  }
+  await openFolder(item.url, item.name, opts);
+}
+
+async function openFolder(url, name, opts) {
   if (loading) return;
   loading = true;
   bgAbort = false;
   goScreen("loading", false);
-  setLoading("フォルダ情報を取得中...", name || "");
+  setLoading("情報を取得中...", name || "");
 
   try {
-    const opts = childName ? { onlyChildName: childName } : {};
     const fileList = await loadMegaFolder(
       url,
       (msg) => setLoading(msg, name || ""),
-      opts
+      opts || {}
     );
     if (fileList.length === 0) throw new Error("表示できるファイルがありません");
 
@@ -221,7 +222,7 @@ async function openFolder(url, name, childName) {
 
     for (let i = 0; i < first.length; i++) {
       setLoading(
-        "すぐ表示するページを準備中 (" + (i + 1) + "/" + first.length + ")",
+        "準備中 (" + (i + 1) + "/" + first.length + ")",
         first[i].path
       );
       try {
@@ -236,7 +237,6 @@ async function openFolder(url, name, childName) {
       throw new Error("表示できるページがありませんでした");
     }
 
-    // ビューアを履歴に積む → 端末の「戻る」で本棚に戻れる
     goScreen("viewer", true);
     if (viewer) viewer.destroy();
     viewer = new ComicViewer({
@@ -273,11 +273,9 @@ async function loadRestInBackground(fileList) {
       }
     }
   }
-  const workers = [];
-  for (let w = 0; w < Math.min(PARALLEL, fileList.length); w++) {
-    workers.push(worker());
-  }
-  await Promise.all(workers);
+  await Promise.all(
+    Array.from({ length: Math.min(PARALLEL, fileList.length) }, () => worker())
+  );
 }
 
 function resetViewerState() {
@@ -294,11 +292,9 @@ function resetViewerState() {
   createdUrls = [];
 }
 
-/** 画面上の ← ボタン用：履歴を戻して本棚へ */
 function backToShelfFromButton() {
   resetViewerState();
   renderShelf();
-  // 履歴が viewer なら back、そうでなければ start を表示
   if (history.state && history.state.screen === "viewer") {
     historyLock = true;
     history.back();
@@ -316,13 +312,12 @@ function setLoading(text, progress) {
   loadingProgress.textContent = progress || "";
 }
 
-// --- 一括登録 ---
 async function bulkFetch() {
   const url = bulkUrl.value.trim();
   bulkError.classList.add("hidden");
   bulkList.innerHTML = "";
   bulkAddAllBtn.classList.add("hidden");
-  bulkChildren = [];
+  bulkFiles = [];
   bulkParentUrl = "";
 
   if (!url || !/mega\.(nz|co\.nz)/i.test(url)) {
@@ -332,31 +327,32 @@ async function bulkFetch() {
   }
 
   bulkFetchBtn.disabled = true;
-  bulkStatus.textContent = "取得中…（フォルダが多いと数分かかることがあります）";
+  bulkStatus.textContent = "取得中…（多いと数分かかることがあります）";
 
   try {
-    const dirs = await listChildFolders(url, (msg) => {
+    const files = await listChildFiles(url, (msg) => {
       bulkStatus.textContent = msg;
     });
-    if (dirs.length === 0) {
-      bulkStatus.textContent = "直下にフォルダがありませんでした";
+    if (files.length === 0) {
+      bulkStatus.textContent =
+        "直下にPDF・画像がありませんでした（サブフォルダ内は対象外です）";
       return;
     }
     bulkParentUrl = url;
-    bulkChildren = dirs;
-    bulkStatus.textContent = dirs.length + " 個のフォルダが見つかりました";
+    bulkFiles = files;
+    bulkStatus.textContent = files.length + " 個のファイルが見つかりました";
     bulkList.innerHTML = "";
-    dirs.forEach((d) => {
+    files.forEach((f) => {
       const row = document.createElement("div");
       row.className = "bulk-item";
       const span = document.createElement("span");
       span.className = "name";
-      span.textContent = d.name;
+      span.textContent = f.name + (f.isPdf ? " [PDF]" : "");
       row.appendChild(span);
       bulkList.appendChild(row);
     });
     bulkAddAllBtn.classList.remove("hidden");
-    bulkAddAllBtn.textContent = dirs.length + " 件すべて本棚に追加";
+    bulkAddAllBtn.textContent = files.length + " 件すべて本棚に追加";
   } catch (e) {
     console.error(e);
     bulkError.textContent = e.message || "取得に失敗しました";
@@ -368,17 +364,20 @@ async function bulkFetch() {
 }
 
 function bulkAddAll() {
-  if (!bulkParentUrl || bulkChildren.length === 0) return;
+  if (!bulkParentUrl || bulkFiles.length === 0) return;
   const list = getShelf();
-  const existing = new Set(list.map((x) => (x.childName || "") + "\n" + x.url));
+  const existing = new Set(
+    list.map((x) => (x.fileName || x.childName || "") + "\n" + x.url)
+  );
   let added = 0;
-  for (const d of bulkChildren) {
-    const key = d.name + "\n" + bulkParentUrl;
+  for (const f of bulkFiles) {
+    const key = f.name + "\n" + bulkParentUrl;
     if (existing.has(key)) continue;
     list.push({
-      name: d.name,
+      name: f.name.replace(/\.pdf$/i, ""),
       url: bulkParentUrl,
-      childName: d.name,
+      kind: "file",
+      fileName: f.name,
     });
     existing.add(key);
     added++;
@@ -389,29 +388,19 @@ function bulkAddAll() {
   goScreen("start", false);
 }
 
-// 端末の戻るボタン / ジェスチャー
 window.addEventListener("popstate", (e) => {
   if (historyLock) return;
   const screen = (e.state && e.state.screen) || "start";
-
-  // ビューア表示中なら中身を解放
-  if (!viewerScreen.classList.contains("hidden")) {
-    resetViewerState();
-  }
-
-  if (screen === "add") {
-    showScreen("add");
-  } else if (screen === "bulk") {
-    showScreen("bulk");
-  } else if (screen === "auth") {
-    showScreen("auth");
-  } else {
+  if (!viewerScreen.classList.contains("hidden")) resetViewerState();
+  if (screen === "add") showScreen("add");
+  else if (screen === "bulk") showScreen("bulk");
+  else if (screen === "auth") showScreen("auth");
+  else {
     renderShelf();
     showScreen("start");
   }
 });
 
-// events
 authBtn.addEventListener("click", handleAuth);
 authInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleAuth();
@@ -424,11 +413,8 @@ addFolderBtn.addEventListener("click", () => {
   goScreen("add", true);
 });
 cancelAddBtn.addEventListener("click", () => {
-  if (history.state && history.state.screen === "add") {
-    history.back();
-  } else {
-    goScreen("start", false);
-  }
+  if (history.state && history.state.screen === "add") history.back();
+  else goScreen("start", false);
 });
 lockBtn.addEventListener("click", lockApp);
 
@@ -458,16 +444,13 @@ bulkFolderBtn.addEventListener("click", () => {
   bulkStatus.textContent = "";
   bulkError.classList.add("hidden");
   bulkAddAllBtn.classList.add("hidden");
-  bulkChildren = [];
+  bulkFiles = [];
   bulkParentUrl = "";
   goScreen("bulk", true);
 });
 bulkCancelBtn.addEventListener("click", () => {
-  if (history.state && history.state.screen === "bulk") {
-    history.back();
-  } else {
-    goScreen("start", false);
-  }
+  if (history.state && history.state.screen === "bulk") history.back();
+  else goScreen("start", false);
 });
 bulkFetchBtn.addEventListener("click", bulkFetch);
 bulkAddAllBtn.addEventListener("click", bulkAddAll);
