@@ -52,6 +52,8 @@ let bgAbort = false;
 let authMode = "login";
 let bulkParentUrl = "";
 let bulkChildren = [];
+/** 履歴操作中フラグ（popstate との二重処理防止） */
+let historyLock = false;
 
 async function sha256(text) {
   const data = new TextEncoder().encode(text);
@@ -78,6 +80,19 @@ function showScreen(name) {
   bulkScreen.classList.toggle("hidden", name !== "bulk");
   loadingScreen.classList.toggle("hidden", name !== "loading");
   viewerScreen.classList.toggle("hidden", name !== "viewer");
+}
+
+/** 画面を変えつつブラウザ履歴に積む */
+function goScreen(name, push) {
+  showScreen(name);
+  if (historyLock) return;
+  try {
+    if (push) {
+      history.pushState({ screen: name }, "");
+    } else {
+      history.replaceState({ screen: name }, "");
+    }
+  } catch (_) {}
 }
 
 function renderShelf() {
@@ -124,7 +139,7 @@ function showAuth() {
     : "初めての利用です。好きなパスワードを決めてください";
   authInput.value = "";
   authError.classList.add("hidden");
-  showScreen("auth");
+  goScreen("auth", false);
   setTimeout(() => authInput.focus(), 100);
 }
 
@@ -153,7 +168,7 @@ async function handleAuth() {
 
 function enterApp() {
   renderShelf();
-  showScreen("start");
+  goScreen("start", false);
 }
 
 function lockApp() {
@@ -188,7 +203,7 @@ async function openFolder(url, name, childName) {
   if (loading) return;
   loading = true;
   bgAbort = false;
-  showScreen("loading");
+  goScreen("loading", false);
   setLoading("フォルダ情報を取得中...", name || "");
 
   try {
@@ -221,7 +236,8 @@ async function openFolder(url, name, childName) {
       throw new Error("表示できるページがありませんでした");
     }
 
-    showScreen("viewer");
+    // ビューアを履歴に積む → 端末の「戻る」で本棚に戻れる
+    goScreen("viewer", true);
     if (viewer) viewer.destroy();
     viewer = new ComicViewer({
       container: document.getElementById("viewer"),
@@ -229,7 +245,7 @@ async function openFolder(url, name, childName) {
       slotRight: document.getElementById("page-right"),
       pageInfo: document.getElementById("page-info"),
       slider: document.getElementById("page-slider"),
-      onExit: backToShelf,
+      onExit: backToShelfFromButton,
     });
     viewer.setPages(firstPages);
 
@@ -237,7 +253,7 @@ async function openFolder(url, name, childName) {
   } catch (err) {
     console.error(err);
     alert(err.message || "読み込みに失敗しました");
-    showScreen("start");
+    goScreen("start", false);
   } finally {
     loading = false;
   }
@@ -278,10 +294,21 @@ function resetViewerState() {
   createdUrls = [];
 }
 
-function backToShelf() {
+/** 画面上の ← ボタン用：履歴を戻して本棚へ */
+function backToShelfFromButton() {
   resetViewerState();
   renderShelf();
-  showScreen("start");
+  // 履歴が viewer なら back、そうでなければ start を表示
+  if (history.state && history.state.screen === "viewer") {
+    historyLock = true;
+    history.back();
+    setTimeout(() => {
+      historyLock = false;
+      goScreen("start", false);
+    }, 0);
+  } else {
+    goScreen("start", false);
+  }
 }
 
 function setLoading(text, progress) {
@@ -322,8 +349,10 @@ async function bulkFetch() {
     dirs.forEach((d) => {
       const row = document.createElement("div");
       row.className = "bulk-item";
-      row.innerHTML = '<span class="name"></span>';
-      row.querySelector(".name").textContent = d.name;
+      const span = document.createElement("span");
+      span.className = "name";
+      span.textContent = d.name;
+      row.appendChild(span);
       bulkList.appendChild(row);
     });
     bulkAddAllBtn.classList.remove("hidden");
@@ -341,9 +370,7 @@ async function bulkFetch() {
 function bulkAddAll() {
   if (!bulkParentUrl || bulkChildren.length === 0) return;
   const list = getShelf();
-  const existing = new Set(
-    list.map((x) => (x.childName || "") + "\n" + x.url)
-  );
+  const existing = new Set(list.map((x) => (x.childName || "") + "\n" + x.url));
   let added = 0;
   for (const d of bulkChildren) {
     const key = d.name + "\n" + bulkParentUrl;
@@ -359,8 +386,30 @@ function bulkAddAll() {
   saveShelf(list);
   alert(added + " 件を本棚に追加しました（重複はスキップ）");
   renderShelf();
-  showScreen("start");
+  goScreen("start", false);
 }
+
+// 端末の戻るボタン / ジェスチャー
+window.addEventListener("popstate", (e) => {
+  if (historyLock) return;
+  const screen = (e.state && e.state.screen) || "start";
+
+  // ビューア表示中なら中身を解放
+  if (!viewerScreen.classList.contains("hidden")) {
+    resetViewerState();
+  }
+
+  if (screen === "add") {
+    showScreen("add");
+  } else if (screen === "bulk") {
+    showScreen("bulk");
+  } else if (screen === "auth") {
+    showScreen("auth");
+  } else {
+    renderShelf();
+    showScreen("start");
+  }
+});
 
 // events
 authBtn.addEventListener("click", handleAuth);
@@ -372,9 +421,15 @@ addFolderBtn.addEventListener("click", () => {
   folderName.value = "";
   folderUrl.value = "";
   addError.classList.add("hidden");
-  showScreen("add");
+  goScreen("add", true);
 });
-cancelAddBtn.addEventListener("click", () => showScreen("start"));
+cancelAddBtn.addEventListener("click", () => {
+  if (history.state && history.state.screen === "add") {
+    history.back();
+  } else {
+    goScreen("start", false);
+  }
+});
 lockBtn.addEventListener("click", lockApp);
 
 saveFolderBtn.addEventListener("click", () => {
@@ -394,7 +449,7 @@ saveFolderBtn.addEventListener("click", () => {
   list.push({ name, url });
   saveShelf(list);
   renderShelf();
-  showScreen("start");
+  goScreen("start", false);
 });
 
 bulkFolderBtn.addEventListener("click", () => {
@@ -405,9 +460,15 @@ bulkFolderBtn.addEventListener("click", () => {
   bulkAddAllBtn.classList.add("hidden");
   bulkChildren = [];
   bulkParentUrl = "";
-  showScreen("bulk");
+  goScreen("bulk", true);
 });
-bulkCancelBtn.addEventListener("click", () => showScreen("start"));
+bulkCancelBtn.addEventListener("click", () => {
+  if (history.state && history.state.screen === "bulk") {
+    history.back();
+  } else {
+    goScreen("start", false);
+  }
+});
 bulkFetchBtn.addEventListener("click", bulkFetch);
 bulkAddAllBtn.addEventListener("click", bulkAddAll);
 
