@@ -1,4 +1,4 @@
-import { loadMegaFolder, listChildFiles, downloadFile, guessMime } from "./mega-loader.js";
+import { loadMegaFolder, listAllFiles, downloadFile, guessMime } from "./mega-loader.js";
 import { renderPdfPages } from "./pdf-renderer.js";
 import { bufferToObjectURL, loadImageSize } from "./utils.js";
 import { ComicViewer } from "./viewer.js";
@@ -41,9 +41,6 @@ const loadingProgress = document.getElementById("loading-progress");
 const SHELF_KEY = "mcv_shelf";
 const PASS_KEY = "mcv_pass_hash";
 const SESSION_KEY = "mcv_unlocked";
-
-const FIRST_BATCH = 4;
-const PARALLEL = 3;
 
 let viewer = null;
 let createdUrls = [];
@@ -95,7 +92,7 @@ function renderShelf() {
   shelfList.innerHTML = "";
   if (list.length === 0) {
     shelfList.innerHTML =
-      '<p class="empty-shelf">まだありません<br>「1件追加」または「親フォルダから一括登録」</p>';
+      '<p class="empty-shelf">まだありません<br>一括登録でPDFを1件ずつ追加</p>';
     return;
   }
   list.forEach((item, index) => {
@@ -173,7 +170,9 @@ async function processFile(item) {
   const buffer = await downloadFile(item.file);
   const pages = [];
   if (item.isPdf) {
-    const pdfUrls = await renderPdfPages(buffer);
+    const pdfUrls = await renderPdfPages(buffer, (page, total) => {
+      setLoading("PDF変換中 (" + page + "/" + total + ")", item.path || item.name);
+    });
     createdUrls.push(...pdfUrls);
     for (const u of pdfUrls) {
       try {
@@ -181,8 +180,7 @@ async function processFile(item) {
       } catch (_) {}
     }
   } else {
-    const mime = guessMime(item.name);
-    const objUrl = bufferToObjectURL(buffer, mime);
+    const objUrl = bufferToObjectURL(buffer, guessMime(item.name));
     createdUrls.push(objUrl);
     try {
       pages.push(await loadImageSize(objUrl));
@@ -193,7 +191,9 @@ async function processFile(item) {
 
 async function openItem(item) {
   const opts = {};
-  if (item.kind === "file" && item.fileName) {
+  if (item.kind === "file" && item.filePath) {
+    opts.onlyFilePath = item.filePath;
+  } else if (item.kind === "file" && item.fileName) {
     opts.onlyFileName = item.fileName;
   } else if (item.childName) {
     opts.onlyChildName = item.childName;
@@ -216,26 +216,10 @@ async function openFolder(url, name, opts) {
     );
     if (fileList.length === 0) throw new Error("表示できるファイルがありません");
 
-    const first = fileList.slice(0, FIRST_BATCH);
-    const rest = fileList.slice(FIRST_BATCH);
-    const firstPages = [];
-
-    for (let i = 0; i < first.length; i++) {
-      setLoading(
-        "準備中 (" + (i + 1) + "/" + first.length + ")",
-        first[i].path
-      );
-      try {
-        const pages = await processFile(first[i]);
-        firstPages.push(...pages);
-      } catch (e) {
-        console.warn("スキップ:", first[i].path, e);
-      }
-    }
-
-    if (firstPages.length === 0) {
-      throw new Error("表示できるページがありませんでした");
-    }
+    // 先頭の1ファイルだけ開く（複数PDFをまとめない）
+    setLoading("ダウンロード＆変換中...", fileList[0].path || fileList[0].name);
+    const firstPages = await processFile(fileList[0]);
+    if (!firstPages.length) throw new Error("表示できるページがありませんでした");
 
     goScreen("viewer", true);
     if (viewer) viewer.destroy();
@@ -248,8 +232,6 @@ async function openFolder(url, name, opts) {
       onExit: backToShelfFromButton,
     });
     viewer.setPages(firstPages);
-
-    if (rest.length > 0) loadRestInBackground(rest);
   } catch (err) {
     console.error(err);
     alert(err.message || "読み込みに失敗しました");
@@ -257,25 +239,6 @@ async function openFolder(url, name, opts) {
   } finally {
     loading = false;
   }
-}
-
-async function loadRestInBackground(fileList) {
-  let idx = 0;
-  async function worker() {
-    while (idx < fileList.length && !bgAbort) {
-      const i = idx++;
-      const item = fileList[i];
-      try {
-        const pages = await processFile(item);
-        if (pages.length && viewer && !bgAbort) viewer.appendPages(pages);
-      } catch (e) {
-        console.warn("裏読み込みスキップ:", item.path, e);
-      }
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(PARALLEL, fileList.length) }, () => worker())
-  );
 }
 
 function resetViewerState() {
@@ -327,32 +290,31 @@ async function bulkFetch() {
   }
 
   bulkFetchBtn.disabled = true;
-  bulkStatus.textContent = "取得中…（多いと数分かかることがあります）";
+  bulkStatus.textContent = "取得中…（多いと時間がかかります）";
 
   try {
-    const files = await listChildFiles(url, (msg) => {
+    const files = await listAllFiles(url, (msg) => {
       bulkStatus.textContent = msg;
     });
     if (files.length === 0) {
-      bulkStatus.textContent =
-        "直下にPDF・画像がありませんでした（サブフォルダ内は対象外です）";
+      bulkStatus.textContent = "PDF・画像が見つかりませんでした";
       return;
     }
     bulkParentUrl = url;
     bulkFiles = files;
-    bulkStatus.textContent = files.length + " 個のファイルが見つかりました";
+    bulkStatus.textContent = files.length + " 個 → 1件ずつ登録します";
     bulkList.innerHTML = "";
     files.forEach((f) => {
       const row = document.createElement("div");
       row.className = "bulk-item";
       const span = document.createElement("span");
       span.className = "name";
-      span.textContent = f.name + (f.isPdf ? " [PDF]" : "");
+      span.textContent = f.path + (f.isPdf ? " [PDF]" : "");
       row.appendChild(span);
       bulkList.appendChild(row);
     });
     bulkAddAllBtn.classList.remove("hidden");
-    bulkAddAllBtn.textContent = files.length + " 件すべて本棚に追加";
+    bulkAddAllBtn.textContent = files.length + " 件を1冊ずつ本棚に追加";
   } catch (e) {
     console.error(e);
     bulkError.textContent = e.message || "取得に失敗しました";
@@ -366,24 +328,23 @@ async function bulkFetch() {
 function bulkAddAll() {
   if (!bulkParentUrl || bulkFiles.length === 0) return;
   const list = getShelf();
-  const existing = new Set(
-    list.map((x) => (x.fileName || x.childName || "") + "\n" + x.url)
-  );
+  const existing = new Set(list.map((x) => (x.filePath || "") + "\n" + x.url));
   let added = 0;
   for (const f of bulkFiles) {
-    const key = f.name + "\n" + bulkParentUrl;
+    const key = f.path + "\n" + bulkParentUrl;
     if (existing.has(key)) continue;
     list.push({
-      name: f.name.replace(/\.pdf$/i, ""),
+      name: f.name.replace(/\.(pdf|png|jpe?g|webp|gif)$/i, ""),
       url: bulkParentUrl,
       kind: "file",
+      filePath: f.path,
       fileName: f.name,
     });
     existing.add(key);
     added++;
   }
   saveShelf(list);
-  alert(added + " 件を本棚に追加しました（重複はスキップ）");
+  alert(added + " 件を1冊ずつ追加しました");
   renderShelf();
   goScreen("start", false);
 }
