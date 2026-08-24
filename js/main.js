@@ -575,4 +575,104 @@ async function bulkFetch() {
     }
 
     // フォルダが無くファイルだけなら1ファイル＝1冊
-    const files = await
+    const files = await listAllFiles(url, (msg) => {
+      bulkStatus.textContent = msg;
+    });
+    if (!files.length) {
+      bulkStatus.textContent = "画像・PDFが見つかりませんでした";
+      return;
+    }
+    bulkMode = "files";
+    bulkParentUrl = url;
+    bulkEntries = files;
+    bulkStatus.textContent = files.length + " ファイル（1件＝1冊）";
+    bulkList.innerHTML = "";
+    files.forEach((f) => {
+      const row = document.createElement("div");
+      row.className = "bulk-item";
+      const span = document.createElement("span");
+      span.className = "name";
+      span.textContent = f.path + (f.isPdf ? " [PDF]" : "");
+      row.appendChild(span);
+      bulkList.appendChild(row);
+    });
+    bulkAddAllBtn.classList.remove("hidden");
+    bulkAddAllBtn.textContent = files.length + " 件を追加";
+  } catch (e) {
+    console.error(e);
+    bulkError.textContent = e.message || "取得に失敗しました";
+    bulkError.classList.remove("hidden");
+    bulkStatus.textContent = "";
+  } finally {
+    bulkFetchBtn.disabled = false;
+  }
+}
+
+function bulkAddAll() {
+  if (!bulkParentUrl || !bulkEntries.length) return;
+  const data = getShelf();
+  let added = 0;
+
+  if (bulkMode === "folders") {
+    const existing = new Set(
+      data.items.map(
+        (x) =>
+          (x.childName || "") +
+          "\n" +
+          (x.rootFilesOnly ? "root" : "") +
+          "\n" +
+          (x.url || "")
+      )
+    );
+    for (const f of bulkEntries) {
+      const key =
+        (f.childName || "") +
+        "\n" +
+        (f.isRootFiles ? "root" : "") +
+        "\n" +
+        bulkParentUrl;
+      if (existing.has(key)) continue;
+      data.items.push({
+        id: uid(),
+        type: "book",
+        name: f.name,
+        url: bulkParentUrl,
+        kind: "dir",
+        childName: f.childName,
+        rootFilesOnly: !!f.isRootFiles,
+        parentId: currentFolderId,
+      });
+      existing.add(key);
+      added++;
+    }
+  } else {
+    const existing = new Set(
+      data.items.map((x) => (x.filePath || "") + "\n" + (x.url || ""))
+    );
+    for (const f of bulkEntries) {
+      const key = f.path + "\n" + bulkParentUrl;
+      if (existing.has(key)) continue;
+      data.items.push({
+        id: uid(),
+        type: "book",
+        name: f.name.replace(/\.(pdf|png|jpe?g|webp|gif)$/i, ""),
+        url: bulkParentUrl,
+        kind: "file",
+        filePath: f.path,
+        fileName: f.name,
+        parentId: currentFolderId,
+      });
+      existing.add(key);
+      added++;
+    }
+  }
+
+  saveShelf(data);
+  alert(added + " 件を追加しました");
+  renderShelf();
+  goScreen("start", false);
+}
+
+window.addEventListener("popstate", (e) => {
+  if (historyLock) return;
+  
