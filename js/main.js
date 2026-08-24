@@ -33,6 +33,7 @@ const addError = document.getElementById("add-error");
 
 const bulkUrl = document.getElementById("bulk-url");
 const bulkFetchBtn = document.getElementById("bulk-fetch-btn");
+const bulkFetchPdfBtn = document.getElementById("bulk-fetch-pdf-btn");
 const bulkCancelBtn = document.getElementById("bulk-cancel-btn");
 const bulkAddAllBtn = document.getElementById("bulk-add-all-btn");
 const bulkList = document.getElementById("bulk-list");
@@ -280,7 +281,8 @@ async function bulkFetch() {
   }
 
   bulkFetchBtn.disabled = true;
-  bulkStatus.textContent = "取得中…";
+  if (bulkFetchPdfBtn) bulkFetchPdfBtn.disabled = true;
+  bulkStatus.textContent = "フォルダを検索中…";
 
   try {
     const folders = await listImageFolders(url, (msg) => {
@@ -306,28 +308,7 @@ async function bulkFetch() {
       return;
     }
 
-    const files = await listAllFiles(url, (msg) => {
-      bulkStatus.textContent = msg;
-    });
-    if (!files.length) {
-      bulkStatus.textContent = "画像・PDFが見つかりませんでした";
-      return;
-    }
-    bulkMode = "files";
-    bulkParentUrl = url;
-    bulkEntries = files;
-    bulkStatus.textContent = files.length + " ファイル（1件＝1冊）";
-    files.forEach((f) => {
-      const row = document.createElement("div");
-      row.className = "bulk-item";
-      const span = document.createElement("span");
-      span.className = "name";
-      span.textContent = f.path + (f.isPdf ? " [PDF]" : "");
-      row.appendChild(span);
-      bulkList.appendChild(row);
-    });
-    bulkAddAllBtn.classList.remove("hidden");
-    bulkAddAllBtn.textContent = files.length + " 件を追加";
+    bulkStatus.textContent = "画像フォルダがありません。PDFモードを試してください";
   } catch (e) {
     console.error(e);
     bulkError.textContent = e.message || "取得に失敗しました";
@@ -335,6 +316,62 @@ async function bulkFetch() {
     bulkStatus.textContent = "";
   } finally {
     bulkFetchBtn.disabled = false;
+    if (bulkFetchPdfBtn) bulkFetchPdfBtn.disabled = false;
+  }
+}
+
+async function bulkFetchPdfs() {
+  const url = bulkUrl.value.trim();
+  bulkError.classList.add("hidden");
+  bulkList.innerHTML = "";
+  bulkAddAllBtn.classList.add("hidden");
+  bulkEntries = [];
+  bulkParentUrl = "";
+
+  if (!url || !/mega\.(nz|co\.nz)/i.test(url)) {
+    bulkError.textContent = "正しいMEGAフォルダリンクを入力してください";
+    bulkError.classList.remove("hidden");
+    return;
+  }
+
+  bulkFetchBtn.disabled = true;
+  if (bulkFetchPdfBtn) bulkFetchPdfBtn.disabled = true;
+  bulkStatus.textContent = "PDFを検索中…";
+
+  try {
+    const files = await listAllFiles(url, (msg) => {
+      bulkStatus.textContent = msg;
+    });
+    const pdfs = files.filter((f) => f.isPdf);
+
+    if (!pdfs.length) {
+      bulkStatus.textContent = "PDFが見つかりませんでした";
+      return;
+    }
+
+    bulkMode = "files";
+    bulkParentUrl = url;
+    bulkEntries = pdfs;
+    bulkStatus.textContent = pdfs.length + " 個のPDF（1ファイル＝1冊）";
+    pdfs.forEach((f) => {
+      const row = document.createElement("div");
+      row.className = "bulk-item";
+      const span = document.createElement("span");
+      span.className = "name";
+      span.textContent = "📄 " + f.path;
+      row.appendChild(span);
+      bulkList.appendChild(row);
+    });
+    bulkAddAllBtn.classList.remove("hidden");
+    bulkAddAllBtn.textContent = pdfs.length + " 冊を本棚に追加";
+  } catch (e) {
+    console.error(e);
+    bulkError.textContent = e.message || "取得に失敗しました";
+    bulkError.classList.remove("hidden");
+    bulkStatus.textContent = "";
+  } finally {
+    bulkFetchBtn.disabled = false;
+    if (bulkFetchPdfBtn) bulkFetchPdfBtn.disabled = false;
   }
 }
 
@@ -500,6 +537,9 @@ bulkCancelBtn.addEventListener("click", () => {
 });
 
 bulkFetchBtn.addEventListener("click", bulkFetch);
+if (bulkFetchPdfBtn) {
+  bulkFetchPdfBtn.addEventListener("click", bulkFetchPdfs);
+}
 bulkAddAllBtn.addEventListener("click", bulkAddAll);
 
 moveRootBtn.addEventListener("click", () => {
@@ -516,4 +556,4 @@ if (sessionStorage.getItem(SESSION_KEY) === "1" && localStorage.getItem(PASS_KEY
   enterApp();
 } else {
   showAuth();
-}
+                  }
