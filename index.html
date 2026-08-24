@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <!-- パスワード -->
   <div id="auth-screen" class="screen hidden">
     <div class="start-box">
       <h1 id="auth-title">パスワード</h1>
@@ -19,7 +18,6 @@
     </div>
   </div>
 
-  <!-- 本棚 -->
   <div id="start-screen" class="screen hidden">
     <div class="library-wrap">
       <div class="shelf-header">
@@ -35,7 +33,6 @@
     </div>
   </div>
 
-  <!-- 1件追加 -->
   <div id="add-screen" class="screen hidden">
     <div class="start-box">
       <h1>1件追加</h1>
@@ -47,13 +44,13 @@
     </div>
   </div>
 
-  <!-- 一括登録 -->
   <div id="bulk-screen" class="screen hidden">
     <div class="library-wrap">
       <h1>一括登録</h1>
-      <p class="subtitle">WebPフォルダやPDFを本棚に追加</p>
+      <p class="subtitle">フォルダ＝1冊 / PDF＝1冊 を選べます</p>
       <input type="text" id="bulk-url" placeholder="親フォルダのMEGAリンク" autocomplete="off" spellcheck="false" />
-      <button id="bulk-fetch-btn" type="button">一覧を取得</button>
+      <button id="bulk-fetch-btn" type="button">フォルダを1冊ずつ取得</button>
+      <button id="bulk-fetch-pdf-btn" type="button" class="secondary-btn">PDFを1冊ずつ取得</button>
       <button id="bulk-cancel-btn" type="button" class="secondary-btn">キャンセル</button>
       <p id="bulk-status" class="tips-line"></p>
       <p id="bulk-error" class="error hidden"></p>
@@ -62,7 +59,6 @@
     </div>
   </div>
 
-  <!-- 移動先 -->
   <div id="move-screen" class="screen hidden">
     <div class="library-wrap">
       <h1>移動先フォルダ</h1>
@@ -73,7 +69,6 @@
     </div>
   </div>
 
-  <!-- ローディング -->
   <div id="loading-screen" class="screen hidden">
     <div class="loader">
       <div class="spinner"></div>
@@ -82,7 +77,6 @@
     </div>
   </div>
 
-  <!-- ビューア -->
   <div id="viewer-screen" class="screen hidden">
     <div id="viewer">
       <div id="page-left" class="page-slot"></div>
