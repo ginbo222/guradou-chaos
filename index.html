@@ -22,10 +22,14 @@
   <!-- 本棚 -->
   <div id="start-screen" class="screen hidden">
     <div class="library-wrap">
-      <h1>本棚</h1>
-      <p class="subtitle">タップして読む</p>
+      <div class="shelf-header">
+        <button id="shelf-back-btn" type="button" class="icon-btn hidden">←</button>
+        <h1 id="shelf-title">本棚</h1>
+      </div>
+      <p class="subtitle" id="shelf-sub">タップして読む</p>
       <div id="shelf-list"></div>
-      <button id="add-folder-btn" type="button" class="secondary-btn">＋ 1件追加</button>
+      <button id="add-folder-btn" type="button" class="secondary-btn">＋ フォルダを作る</button>
+      <button id="add-item-btn" type="button" class="secondary-btn">＋ 1件追加</button>
       <button id="bulk-folder-btn" type="button" class="secondary-btn">親フォルダから一括登録</button>
       <button id="lock-btn" type="button" class="text-btn">ロック</button>
     </div>
@@ -34,8 +38,8 @@
   <!-- 1件追加 -->
   <div id="add-screen" class="screen hidden">
     <div class="start-box">
-      <h1>フォルダを追加</h1>
-      <input type="text" id="folder-name" placeholder="名前（例: 野菜）" autocomplete="off" />
+      <h1>1件追加</h1>
+      <input type="text" id="folder-name" placeholder="表示名" autocomplete="off" />
       <input type="text" id="folder-url" placeholder="https://mega.nz/folder/xxxx#yyyy" autocomplete="off" spellcheck="false" />
       <button id="save-folder-btn" type="button">保存</button>
       <button id="cancel-add-btn" type="button" class="secondary-btn">キャンセル</button>
@@ -43,11 +47,11 @@
     </div>
   </div>
 
-  <!-- 親から一括登録 -->
+  <!-- 一括登録 -->
   <div id="bulk-screen" class="screen hidden">
     <div class="library-wrap">
       <h1>一括登録</h1>
-      <p class="subtitle">親フォルダの直下を本棚に追加</p>
+      <p class="subtitle">WebPフォルダやPDFを本棚に追加</p>
       <input type="text" id="bulk-url" placeholder="親フォルダのMEGAリンク" autocomplete="off" spellcheck="false" />
       <button id="bulk-fetch-btn" type="button">一覧を取得</button>
       <button id="bulk-cancel-btn" type="button" class="secondary-btn">キャンセル</button>
@@ -55,6 +59,17 @@
       <p id="bulk-error" class="error hidden"></p>
       <div id="bulk-list"></div>
       <button id="bulk-add-all-btn" type="button" class="hidden">全部本棚に追加</button>
+    </div>
+  </div>
+
+  <!-- 移動先 -->
+  <div id="move-screen" class="screen hidden">
+    <div class="library-wrap">
+      <h1>移動先フォルダ</h1>
+      <p class="subtitle" id="move-target-name"></p>
+      <div id="move-list"></div>
+      <button id="move-root-btn" type="button" class="secondary-btn">ルート（未分類）へ</button>
+      <button id="move-cancel-btn" type="button" class="secondary-btn">キャンセル</button>
     </div>
   </div>
 
