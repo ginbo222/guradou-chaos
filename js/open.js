@@ -2,7 +2,7 @@ import { loadMegaFolder, downloadFile, guessMime } from "./mega-loader.js";
 import { renderPdfPages } from "./pdf-renderer.js";
 import { bufferToObjectURL, loadImageSize } from "./utils.js";
 import { ComicViewer } from "./viewer.js";
-import { cacheGet, cacheSet, cacheKey } from "./cache.js";
+import { cacheGet, cacheSet, cacheKey, thumbSet } from "./cache.js";
 
 const FIRST_PAGES = 4;
 const PARALLEL = 3;
@@ -97,6 +97,28 @@ async function savePagesToCache(shelfItem, pages) {
   }
 }
 
+async function saveThumb(item, pageUrl) {
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = rej;
+      img.src = pageUrl;
+    });
+    const canvas = document.createElement("canvas");
+    const w = 120;
+    const h = Math.max(1, Math.round((img.naturalHeight / img.naturalWidth) * w));
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.7));
+    if (blob) await thumbSet(cacheKey(item), blob);
+  } catch (e) {
+    console.warn("サムネ作成スキップ", e);
+  }
+}
+
 async function loadRestInBackground(fileList, shelfItem, alreadyPages) {
   const allPages = alreadyPages ? alreadyPages.slice() : [];
   let idx = 0;
@@ -144,6 +166,7 @@ export async function openItem(item, { showScreen, goScreen, onExit }) {
       if (pages.length) {
         goScreen("viewer", true);
         startViewer(pages, onExit);
+        if (pages[0] && pages[0].url) saveThumb(item, pages[0].url);
         loading = false;
         return;
       }
@@ -178,6 +201,7 @@ export async function openItem(item, { showScreen, goScreen, onExit }) {
 
     goScreen("viewer", true);
     startViewer(firstPages, onExit);
+    if (firstPages[0] && firstPages[0].url) saveThumb(item, firstPages[0].url);
 
     if (rest.length) loadRestInBackground(rest, item, firstPages);
     else savePagesToCache(item, firstPages);
@@ -188,4 +212,4 @@ export async function openItem(item, { showScreen, goScreen, onExit }) {
   } finally {
     loading = false;
   }
-}
+    }
