@@ -8,7 +8,6 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <!-- パスワード -->
   <div id="auth-screen" class="screen hidden">
     <div class="start-box">
       <h1 id="auth-title">パスワード</h1>
@@ -19,7 +18,6 @@
     </div>
   </div>
 
-  <!-- 本棚 -->
   <div id="start-screen" class="screen hidden">
     <div class="library-wrap">
       <div class="shelf-header">
@@ -38,7 +36,6 @@
     </div>
   </div>
 
-  <!-- 1件追加 -->
   <div id="add-screen" class="screen hidden">
     <div class="start-box">
       <h1>1件追加</h1>
@@ -50,7 +47,6 @@
     </div>
   </div>
 
-  <!-- 一括登録 -->
   <div id="bulk-screen" class="screen hidden">
     <div class="library-wrap">
       <h1>一括登録</h1>
@@ -63,6 +59,16 @@
       <p id="bulk-error" class="error hidden"></p>
       <div id="bulk-list"></div>
       <button id="bulk-add-all-btn" type="button" class="hidden">全部本棚に追加</button>
+    </div>
+  </div>
+
+  <div id="move-screen" class="screen hidden">
+    <div class="library-wrap">
+      <h1>移動先フォルダ</h1>
+      <p class="subtitle" id="move-target-name"></p>
+      <div id="move-list"></div>
+      <button id="move-root-btn" type="button" class="secondary-btn">ルート（未分類）へ</button>
+      <button id="move-cancel-btn" type="button" class="secondary-btn">キャンセル</button>
     </div>
   </div>
 
