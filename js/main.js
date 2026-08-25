@@ -24,6 +24,9 @@ const addFolderBtn = document.getElementById("add-folder-btn");
 const addItemBtn = document.getElementById("add-item-btn");
 const bulkFolderBtn = document.getElementById("bulk-folder-btn");
 const lockBtn = document.getElementById("lock-btn");
+const exportShelfBtn = document.getElementById("export-shelf-btn");
+const importShelfBtn = document.getElementById("import-shelf-btn");
+const importShelfFile = document.getElementById("import-shelf-file");
 
 const folderName = document.getElementById("folder-name");
 const folderUrl = document.getElementById("folder-url");
@@ -96,6 +99,26 @@ function backToShelfFromButton() {
   }
 }
 
+function displayName(item) {
+  if (item.name && String(item.name).trim()) return String(item.name).trim();
+  if (item.fileName) {
+    return item.fileName.replace(/\.(pdf|png|jpe?g|webp|gif)$/i, "");
+  }
+  if (item.filePath) {
+    const p = item.filePath.split("/").pop() || item.filePath;
+    return p.replace(/\.(pdf|png|jpe?g|webp|gif)$/i, "");
+  }
+  if (item.childName) return item.childName;
+  return "名称未設定";
+}
+
+function displaySub(item) {
+  if (item.filePath && item.filePath.includes("/")) return item.filePath;
+  if (item.kind === "dir" && item.childName) return "フォルダ";
+  if (item.kind === "file") return "PDF/ファイル";
+  return "";
+}
+
 function renderShelf() {
   const data = getShelf();
   const items = data.items.filter((x) => (x.parentId || null) === currentFolderId);
@@ -130,9 +153,21 @@ function appendShelfRow(item, isFolder) {
   icon.className = "icon";
   icon.textContent = isFolder ? "📁" : "📄";
 
+  const thumb = document.createElement("img");
+  thumb.className = "thumb";
+  thumb.alt = "";
+  thumb.style.display = "none";
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
   const nameEl = document.createElement("span");
   nameEl.className = "name";
-  nameEl.textContent = item.name;
+  nameEl.textContent = isFolder ? item.name : displayName(item);
+  const subEl = document.createElement("span");
+  subEl.className = "sub";
+  subEl.textContent = isFolder ? "フォルダ" : displaySub(item);
+  meta.appendChild(nameEl);
+  if (subEl.textContent) meta.appendChild(subEl);
 
   const moveBtn = document.createElement("button");
   moveBtn.className = "act";
@@ -149,7 +184,7 @@ function appendShelfRow(item, isFolder) {
   delBtn.textContent = "削除";
   delBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (!confirm("「" + item.name + "」を削除しますか？")) return;
+    if (!confirm("「" + (item.name || displayName(item)) + "」を削除しますか？")) return;
     const data = getShelf();
     if (item.type === "folder") {
       data.items.forEach((x) => {
@@ -161,10 +196,24 @@ function appendShelfRow(item, isFolder) {
     renderShelf();
   });
 
+  row.appendChild(thumb);
   row.appendChild(icon);
-  row.appendChild(nameEl);
+  row.appendChild(meta);
   row.appendChild(moveBtn);
   row.appendChild(delBtn);
+
+  if (!isFolder) {
+    import("./cache.js").then(({ thumbGet, cacheKey }) => {
+      thumbGet(cacheKey(item)).then((blob) => {
+        if (!blob) return;
+        const u = URL.createObjectURL(blob);
+        thumb.src = u;
+        thumb.style.display = "block";
+        icon.style.display = "none";
+      });
+    });
+  }
+
   row.addEventListener("click", () => {
     if (isFolder) {
       currentFolderId = item.id;
@@ -216,6 +265,59 @@ function moveItemTo(itemId, parentId) {
   movingItemId = null;
   renderShelf();
   goScreen("start", false);
+}
+
+function exportShelf() {
+  const data = getShelf();
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "mcv-shelf.json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(json).then(
+      () =>
+        alert(
+          "書き出しました。\n・ファイル: mcv-shelf.json\n・可能ならクリップボードにもコピー済み\nPCで「本棚を読み込み」してください"
+        ),
+      () => alert("ファイルをダウンロードしました（mcv-shelf.json）")
+    );
+  } else {
+    alert("ファイルをダウンロードしました（mcv-shelf.json）");
+  }
+}
+
+function importShelfFromText(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    alert("JSONの形式が正しくありません");
+    return;
+  }
+  if (!parsed || !Array.isArray(parsed.items)) {
+    alert("本棚データではありません（items がありません）");
+    return;
+  }
+  if (
+    !confirm(
+      parsed.items.length +
+        " 件の本棚を読み込みます。\n今のこの端末の本棚は上書きされます。よろしいですか？"
+    )
+  ) {
+    return;
+  }
+  saveShelf(parsed);
+  currentFolderId = null;
+  renderShelf();
+  alert("読み込みました");
+}
+
+function importShelf() {
+  if (importShelfFile) importShelfFile.click();
 }
 
 function showAuth() {
@@ -494,6 +596,22 @@ cancelAddBtn.addEventListener("click", () => {
 
 lockBtn.addEventListener("click", lockApp);
 
+if (exportShelfBtn) exportShelfBtn.addEventListener("click", exportShelf);
+if (importShelfBtn) importShelfBtn.addEventListener("click", importShelf);
+if (importShelfFile) {
+  importShelfFile.addEventListener("change", async () => {
+    const file = importShelfFile.files && importShelfFile.files[0];
+    importShelfFile.value = "";
+    if (!file) return;
+    try {
+      const text = await file.text();
+      importShelfFromText(text);
+    } catch (e) {
+      alert("ファイルを読めませんでした");
+    }
+  });
+}
+
 saveFolderBtn.addEventListener("click", () => {
   const name = folderName.value.trim();
   const url = folderUrl.value.trim();
@@ -556,4 +674,4 @@ if (sessionStorage.getItem(SESSION_KEY) === "1" && localStorage.getItem(PASS_KEY
   enterApp();
 } else {
   showAuth();
-                  }
+}
